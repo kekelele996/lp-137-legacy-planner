@@ -280,14 +280,23 @@ const isModuleCompleted = (moduleId) => {
 
 const handleExport = () => {
   if (exportWithPassword.value) {
+    if (!exportPassword.value) {
+      alert('请设置导出密码');
+      return;
+    }
     if (exportPassword.value !== exportPasswordConfirm.value) {
       alert('两次输入的密码不一致');
       return;
     }
-    exportData(exportPassword.value);
-  } else {
-    exportData();
   }
+
+  try {
+    exportData(exportWithPassword.value ? exportPassword.value : null);
+  } catch (e) {
+    alert('导出失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+
   showExportModal.value = false;
   exportPassword.value = '';
   exportPasswordConfirm.value = '';

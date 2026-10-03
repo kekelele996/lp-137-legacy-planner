@@ -56,23 +56,54 @@ export function saveData(data) {
   }
 }
 
+/**
+ * 把任意 Unicode 字符串转成 Base64。
+ * 不能直接用 btoa(str)：btoa 只接受 Latin1，含中文时会抛
+ * InvalidCharacterError: The string to be encoded contains characters outside of the Latin1 range。
+ * 这里先按 UTF-8 编码成字节，再逐块拼成 Latin1 二进制串交给 btoa。
+ */
+export function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str)
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
+
+/** utf8ToBase64 的逆运算：Base64 → UTF-8 字符串。 */
+export function base64ToUtf8(base64) {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
 export function exportData(password = null) {
   const data = loadData()
   let content = JSON.stringify(data, null, 2)
-  
+
   if (password) {
-    content = btoa(password + '|' + content)
+    content = utf8ToBase64(password + '|' + content)
   }
-  
+
   const blob = new Blob([content], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
+  const filename = `life-organizer-backup-${Date.now()}.json`
   const a = document.createElement('a')
-  a.href = url
-  a.download = `life-organizer-backup-${Date.now()}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  try {
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+  } finally {
+    if (a.parentNode) a.parentNode.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  return { filename, encrypted: Boolean(password) }
 }
 
 export function importData(file, password = null) {
@@ -83,13 +114,19 @@ export function importData(file, password = null) {
         let content = e.target.result
         
         if (password) {
-          const decoded = atob(content)
-          const [pwd, dataStr] = decoded.split('|')
-          if (pwd !== password) {
+          // 与 exportData 对称：Base64 里存的是 UTF-8 字节，必须按 UTF-8 还原，
+          // 否则 atob 得到的是乱码，JSON.parse 会失败或中文丢失。
+          const decoded = base64ToUtf8(String(content).trim())
+          const separator = decoded.indexOf('|')
+          if (separator === -1) {
+            reject(new Error('文件格式不正确，不是加密备份文件'))
+            return
+          }
+          if (decoded.slice(0, separator) !== password) {
             reject(new Error('密码错误'))
             return
           }
-          content = dataStr
+          content = decoded.slice(separator + 1)
         }
         
         const data = JSON.parse(content)
